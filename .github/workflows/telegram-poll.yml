@@ -1,0 +1,70 @@
+name: Telegram command poll
+
+on:
+  schedule:
+    # Как часто бот забирает команды из Telegram.
+    # '*/5 * * * *'  — раз в 5 минут (нужен ПУБЛИЧНЫЙ репозиторий: там минуты
+    #                  GitHub Actions не тарифицируются).
+    # '*/30 * * * *' — раз в 30 минут, если репозиторий приватный
+    #                  (иначе не хватит бесплатных 2000 минут в месяц).
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+# Тот же concurrency-группа, что и у ежедневной проверки:
+# два прогона одновременно состояние не портят.
+concurrency:
+  group: yesoriginal-price-monitor-state
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    name: Poll /check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Poll Telegram and run /check if requested
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_GID: ${{ vars.GOOGLE_SHEET_GID }}
+          CHECK_HOUR: ${{ vars.CHECK_HOUR }}
+          TIMEZONE: ${{ vars.TIMEZONE }}
+          ENFORCE_SCHEDULE: 'false'   # ручная проверка работает в любое время
+        run: python -m src.poll_telegram
+
+      - name: Commit state
+        run: |
+          set -euo pipefail
+          git config user.name  "yesoriginal-price-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "Состояние не изменилось — коммитить нечего."
+            exit 0
+          fi
+          git commit -m "chore(state): update prices via /check [skip ci]"
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push; then
+              echo "Состояние сохранено (попытка ${attempt})."
+              exit 0
+            fi
+            sleep $(( (RANDOM % 10) + 5 ))
+          done
+          echo "::error::Не удалось сохранить состояние после 5 попыток"
+          exit 1

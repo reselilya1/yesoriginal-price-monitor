@@ -1,0 +1,73 @@
+name: Daily price check
+
+on:
+  schedule:
+    # GitHub Actions понимает только UTC. 08:00 в Праге — это 06:00 UTC летом
+    # (CEST) и 07:00 UTC зимой (CET). Поэтому запускаемся в оба часа,
+    # а скрипт сам проверяет реальное время в Europe/Prague и лишний запуск
+    # завершает сразу. Переход на летнее/зимнее время учитывается автоматически.
+    - cron: '0 6 * * *'
+    - cron: '0 7 * * *'
+  workflow_dispatch:        # кнопка «Run workflow» для ручного запуска
+
+# Ежедневная проверка и обработчик /check пишут в один и тот же файл состояния,
+# поэтому одновременно выполняться не должны.
+concurrency:
+  group: yesoriginal-price-monitor-state
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check prices
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write       # нужно, чтобы закоммитить обновлённый data/state.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run price check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_GID: ${{ vars.GOOGLE_SHEET_GID }}
+          CHECK_HOUR: ${{ vars.CHECK_HOUR }}
+          TIMEZONE: ${{ vars.TIMEZONE }}
+          # Гейт по расписанию — только для запусков по cron.
+          # Ручной запуск (workflow_dispatch) срабатывает в любое время.
+          ENFORCE_SCHEDULE: ${{ github.event_name == 'schedule' }}
+        run: python -m src.run_check
+
+      - name: Commit state
+        run: |
+          set -euo pipefail
+          git config user.name  "yesoriginal-price-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "Состояние не изменилось — коммитить нечего."
+            exit 0
+          fi
+          git commit -m "chore(state): update prices [skip ci]"
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push; then
+              echo "Состояние сохранено (попытка ${attempt})."
+              exit 0
+            fi
+            echo "Push не прошёл, повтор через несколько секунд…"
+            sleep $(( (RANDOM % 10) + 5 ))
+          done
+          echo "::error::Не удалось сохранить состояние после 5 попыток"
+          exit 1

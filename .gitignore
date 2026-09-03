@@ -1,0 +1,23 @@
+# Секреты — никогда не коммитить
+.env
+.env.*
+!.env.example
+*.token
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Локальные копии состояния (боевое состояние лежит в data/state.json и коммитится)
+data/state.local.json
+data/*.bak
+
+# ОС / редакторы
+.DS_Store
+.idea/
+.vscode/
