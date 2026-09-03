@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         items = load_tracked_items()
     except Exception as exc:  # noqa: BLE001
-        log.error("Не удалось прочитать Google Sheets: %s", exc)
+        log.error("%s", exc)
         return 1
 
     if not items:
