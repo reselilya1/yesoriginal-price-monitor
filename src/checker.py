@@ -54,12 +54,23 @@ class CheckResult:
     products_missing: int = 0
     sizes_missing: int = 0
     baseline_items: int = 0
+    prices_recorded: int = 0
     errors: int = 0
     requests_made: int = 0
 
     @property
     def has_changes(self) -> bool:
         return bool(self.changes)
+
+    @property
+    def looks_broken(self) -> bool:
+        """Систематический сбой: артикулов много, а записать не удалось ничего.
+
+        Один-два непрошедших товара — норма. Ноль записанных цен при десятке
+        и более артикулов означает, что сломался сам разбор страниц или доступ
+        к сайту, и такой запуск обязан быть красным, а не «успешным».
+        """
+        return self.unique_articles >= 10 and self.prices_recorded == 0
 
 
 def _validate_price(price: Optional[float], article: str, size: str) -> bool:
@@ -142,6 +153,7 @@ def run_check(
                 result.errors += 1
                 continue
 
+            result.prices_recorded += 1
             record, old_price = store.upsert(
                 article=article,
                 size_eu=size,
@@ -179,10 +191,12 @@ def run_check(
     result.requests_made = site.request_count
     log.info(
         "Проверка завершена. Найдено товаров: %s, не найдено: %s, "
-        "размеров нет на сайте: %s, новых позиций: %s, ошибок: %s, HTTP-запросов: %s",
+        "размеров нет на сайте: %s, записано цен: %s, новых позиций: %s, "
+        "ошибок: %s, HTTP-запросов: %s",
         result.products_found,
         result.products_missing,
         result.sizes_missing,
+        result.prices_recorded,
         result.baseline_items,
         result.errors,
         result.requests_made,

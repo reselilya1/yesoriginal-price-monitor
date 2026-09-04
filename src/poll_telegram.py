@@ -44,8 +44,16 @@ def main() -> int:
     try:
         updates: List[Dict[str, Any]] = telegram.get_updates()
     except TelegramError as exc:
+        # Раньше здесь возвращался 0, и запуск выглядел успешным, хотя бот
+        # не получал сообщений вообще. Теперь такой запуск краснеет.
         log.error("getUpdates не удался: %s", exc)
-        return 0  # временная проблема — просто подождём следующего запуска
+        if "conflict" in str(exc).lower() or "webhook" in str(exc).lower():
+            log.error(
+                "У бота установлен webhook — пока он есть, getUpdates работать не будет. "
+                "Снять: откройте в браузере "
+                "https://api.telegram.org/bot<ТОКЕН>/deleteWebhook"
+            )
+        return 1
 
     if not updates:
         log.info("Новых сообщений нет")
@@ -69,7 +77,17 @@ def main() -> int:
         if not command:
             continue
         if not telegram.is_authorized(chat_id):
-            log.warning("Команда %s из постороннего чата — игнорирую", command)
+            # Самая частая причина — опечатка в TELEGRAM_CHAT_ID. Полные id
+            # в лог не пишем (репозиторий публичный), только длину и хвост:
+            # этого хватает, чтобы заметить несовпадение.
+            log.warning(
+                "Команда %s отклонена: чат не совпадает с TELEGRAM_CHAT_ID "
+                "(пришло: %s знаков, оканчивается на …%s; в секрете: %s знаков, "
+                "оканчивается на …%s). Если это ваш чат — исправьте секрет.",
+                command,
+                len(str(chat_id)), str(chat_id)[-2:],
+                len(telegram.chat_id), telegram.chat_id[-2:],
+            )
             continue
         if command == "/check":
             wants_check = True

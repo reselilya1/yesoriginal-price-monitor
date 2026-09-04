@@ -35,10 +35,30 @@ _SIZE_GROUP_RE = re.compile(r"розм|разм|size", re.IGNORECASE)
 _UNAVAILABLE_RE = re.compile(r"нема[єюї]|відсутн|отсутств|out\s*of\s*stock", re.IGNORECASE)
 
 
+_PARSER_REPORTED = False
+
+
 def _make_soup(html: str) -> BeautifulSoup:
+    """lxml, если он есть; иначе встроенный html.parser.
+
+    Разница существенная: html.parser спотыкается на «грязной» вёрстке и может
+    молча обрезать документ. Поэтому lxml прописан в requirements.txt, а какой
+    парсер реально используется — видно в логах.
+    """
+    global _PARSER_REPORTED
     try:
-        return BeautifulSoup(html, "lxml")
-    except Exception:  # noqa: BLE001 — lxml не обязателен
+        soup = BeautifulSoup(html, "lxml")
+        if not _PARSER_REPORTED:
+            log.info("HTML разбирается парсером lxml")
+            _PARSER_REPORTED = True
+        return soup
+    except Exception:  # noqa: BLE001 — lxml не установлен
+        if not _PARSER_REPORTED:
+            log.warning(
+                "lxml недоступен, использую html.parser — он менее устойчив "
+                "к «грязной» вёрстке. Проверьте, что lxml есть в requirements.txt."
+            )
+            _PARSER_REPORTED = True
         return BeautifulSoup(html, "html.parser")
 
 

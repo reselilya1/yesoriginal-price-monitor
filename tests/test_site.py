@@ -16,10 +16,11 @@ def load(name):
 
 
 class FakeResponse:
-    def __init__(self, text, url):
+    def __init__(self, text, url, headers=None):
         self.text = text
         self.url = url
         self.status_code = 200
+        self.headers = headers or {}
 
 
 class FakeSite(Site):

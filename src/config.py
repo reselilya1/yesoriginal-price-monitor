@@ -84,9 +84,14 @@ COL_SIZE_EU = ("розмір eu", "размер eu", "size eu", "eu")
 BASE_URL = env_str("SITE_BASE_URL", "https://yesoriginal.com.ua").rstrip("/")
 SEARCH_PATH = "/index.php?route=product/search&search={query}"
 
+# Нестандартный User-Agent многие сайты (и Cloudflare перед ними) отклоняют
+# автоматически. Ставим обычный, каким представляется рядовой браузер.
+# Это НЕ обход защиты: капчи и челленджи бот не решает — если сайт отдаёт
+# челлендж, проверка честно фиксирует это в логе и ничего не трогает.
 USER_AGENT = env_str(
     "USER_AGENT",
-    "yesoriginal-price-monitor/1.0 (personal price tracker; 1 request per product per day)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 )
 
 REQUEST_TIMEOUT = env_float("REQUEST_TIMEOUT", 25.0)

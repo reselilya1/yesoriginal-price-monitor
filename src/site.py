@@ -60,12 +60,16 @@ class Site:
         self.session.headers.update(
             {
                 "User-Agent": config.USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "uk-UA,uk;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
             }
         )
         self._last_request_at = 0.0
         self.request_count = 0
+        self._diagnostics_left = 3  # подробный разбор первых неудач
 
     # ---------------------------------------------------------------- low level
 
@@ -115,6 +119,30 @@ class Site:
 
     def search_url(self, article: str) -> str:
         return config.BASE_URL + config.SEARCH_PATH.format(query=quote(article))
+
+    def describe_response(self, response: requests.Response) -> str:
+        """Короткая характеристика ответа — чтобы отличить страницу товара
+        от заглушки Cloudflare, ошибки хостинга или пустого ответа."""
+        text = getattr(response, "text", "") or ""
+        title = ""
+        match = re.search(r"<title[^>]*>(.*?)</title>", text[:20000], re.S | re.I)
+        if match:
+            title = re.sub(r"\s+", " ", match.group(1)).strip()[:90]
+        headers = getattr(response, "headers", {}) or {}
+        marks = []
+        if headers.get("cf-ray"):
+            marks.append("cloudflare")
+        if re.search(r"cf-browser-verification|challenge-platform|__cf_chl|cf-turnstile", text[:60000], re.I):
+            marks.append("ЗАЩИТА-ОТ-БОТОВ")
+        if "product-option" in text:
+            marks.append("есть-блок-размеров")
+        if "application/ld+json" in text:
+            marks.append("есть-json-ld")
+        return (
+            f"HTTP {getattr(response, 'status_code', '?')}, {len(text)} симв., "
+            f"server={headers.get('server', '?')}, title='{title}', "
+            f"признаки: {', '.join(marks) or 'нет'}"
+        )
 
     def _snapshot_if_matches(
         self, response: requests.Response, article: str
@@ -167,6 +195,15 @@ class Site:
             return ResolveResult(
                 snapshot, snapshot.url or response.url,
                 self.request_count - made_before, "search-redirect"
+            )
+
+        # Товар не опознан. Первые несколько раз разбираем ответ подробно:
+        # это единственный способ отличить «такого товара нет в магазине»
+        # от «сайт нас не пустил».
+        if self._diagnostics_left > 0:
+            self._diagnostics_left -= 1
+            log.warning(
+                "Диагностика ответа для %s: %s", article, self.describe_response(response)
             )
 
         # 3. Кандидаты из выдачи

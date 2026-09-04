@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 
@@ -83,6 +84,26 @@ def main(argv: list[str] | None = None) -> int:
     else:
         store.save()
 
+    write_job_summary(result)
+
+    # Систематический сбой не должен выглядеть успешным запуском.
+    if result.looks_broken:
+        log.error(
+            "НИ ОДНОЙ ЦЕНЫ НЕ ЗАПИСАНО при %s артикулах. Это не «товаров нет», "
+            "а поломка. Проверьте по логам выше: (1) какой парсер используется "
+            "— должен быть lxml; (2) находятся ли товары («найден» / «не найден»); "
+            "(3) совпадают ли размеры на сайте с вашими.",
+            result.unique_articles,
+        )
+        if args.report_always and not args.dry_run and telegram.configured:
+            _safe_send(
+                telegram,
+                args.reply_chat,
+                "⚠️ Проверка завершилась без единой цены — похоже, сломался разбор "
+                "страниц сайта. Загляните в логи запуска на GitHub.",
+            )
+        return 1
+
     if was_baseline:
         log.info(
             "Первый запуск: сохранено %s базовых цен, уведомления НЕ отправляются",
@@ -115,6 +136,42 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     return 0
+
+
+def write_job_summary(result) -> None:
+    """Короткая сводка на странице запуска GitHub Actions.
+
+    Видна сразу, без разворачивания логов — по ней понятно, отработал запуск
+    по-настоящему или впустую.
+    """
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    verdict = "❌ ничего не записано — похоже на поломку" if result.looks_broken else "✅ норма"
+    rows = [
+        "## Проверка цен",
+        "",
+        f"**Итог:** {verdict}",
+        "",
+        "| Показатель | Значение |",
+        "|---|---:|",
+        f"| Отслеживаемых позиций (артикул + размер) | {result.active_items} |",
+        f"| Уникальных артикулов | {result.unique_articles} |",
+        f"| Товаров найдено на сайте | {result.products_found} |",
+        f"| Товаров не найдено (игнорируются) | {result.products_missing} |",
+        f"| Размеров нет на сайте | {result.sizes_missing} |",
+        f"| **Цен записано** | **{result.prices_recorded}** |",
+        f"| Новых позиций (без уведомления) | {result.baseline_items} |",
+        f"| Изменений цен | {len(result.changes)} |",
+        f"| Ошибок | {result.errors} |",
+        f"| HTTP-запросов к сайту | {result.requests_made} |",
+        "",
+    ]
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(rows) + "\n")
+    except OSError as exc:  # noqa: BLE001 — сводка не критична
+        log.debug("Не удалось записать сводку запуска: %s", exc)
 
 
 def _safe_send(telegram: Telegram, chat_id: str | None, text: str) -> None:
