@@ -94,7 +94,10 @@ class Site:
                 self.request_count += 1
                 self._last_request_at = time.monotonic()
                 if response.status_code == 404:
-                    raise PermanentFetchError(f"404 для {url}")
+                    if self._diagnostics_left > 0:
+                        self._diagnostics_left -= 1
+                        log.warning("Диагностика отказа: %s", self.describe_response(response))
+                    raise PermanentFetchError(f"HTTP 404 для {url}")
                 if response.status_code in (408, 425, 429, 500, 502, 503, 504):
                     last_error = TemporaryFetchError(
                         f"HTTP {response.status_code} для {url}"
@@ -107,6 +110,11 @@ class Site:
                         url,
                     )
                 elif response.status_code >= 400:
+                    # Именно сюда попадает отказ вида 403 — разбираем ответ,
+                    # чтобы отличить блокировку от обычной ошибки.
+                    if self._diagnostics_left > 0:
+                        self._diagnostics_left -= 1
+                        log.warning("Диагностика отказа: %s", self.describe_response(response))
                     raise PermanentFetchError(f"HTTP {response.status_code} для {url}")
                 else:
                     return response

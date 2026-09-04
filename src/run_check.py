@@ -167,6 +167,11 @@ def write_job_summary(result) -> None:
         f"| HTTP-запросов к сайту | {result.requests_made} |",
         "",
     ]
+    if result.failure_reasons:
+        rows += ["### Из-за чего не получилось", "", "| Причина | Сколько раз |", "|---|---:|"]
+        for reason, count in result.failure_reasons.most_common(5):
+            rows.append(f"| `{reason}` | {count} |")
+        rows.append("")
     try:
         with open(path, "a", encoding="utf-8") as handle:
             handle.write("\n".join(rows) + "\n")

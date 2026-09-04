@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -57,6 +59,7 @@ class CheckResult:
     prices_recorded: int = 0
     errors: int = 0
     requests_made: int = 0
+    failure_reasons: Counter = field(default_factory=Counter)
 
     @property
     def has_changes(self) -> bool:
@@ -71,6 +74,30 @@ class CheckResult:
         к сайту, и такой запуск обязан быть красным, а не «успешным».
         """
         return self.unique_articles >= 10 and self.prices_recorded == 0
+
+
+_HTTP_RE = re.compile(r"HTTP (\d{3})")
+
+
+def short_reason(reason: str) -> str:
+    """'search-failed:HTTP 403 для https://…' -> 'HTTP 403'.
+
+    Нужно, чтобы в сводке запуска была видна причина отказа, а не длинный URL.
+    """
+    match = _HTTP_RE.search(reason or "")
+    if match:
+        return f"HTTP {match.group(1)}"
+    lowered = (reason or "").lower()
+    for needle, label in (
+        ("timeout", "таймаут"),
+        ("timed out", "таймаут"),
+        ("connection", "нет соединения"),
+        ("ssl", "ошибка SSL"),
+        ("not-found", "товар не найден"),
+    ):
+        if needle in lowered:
+            return label
+    return (reason or "неизвестно").split(":")[0][:40]
 
 
 def _validate_price(price: Optional[float], article: str, size: str) -> bool:
@@ -117,6 +144,7 @@ def run_check(
         except Exception as exc:  # noqa: BLE001 — один товар не должен ронять прогон
             log.exception("%s -> ERROR: %s", article, exc)
             result.errors += 1
+            result.failure_reasons[type(exc).__name__] += 1
             continue
 
         snapshot: Optional[ProductSnapshot] = resolved.snapshot
@@ -125,6 +153,7 @@ def run_check(
                 # Сайт временно недоступен: НЕ трогаем сохранённые цены.
                 log.warning("%s -> временная ошибка (%s), состояние не меняю", article, resolved.reason)
                 result.errors += 1
+                result.failure_reasons[short_reason(resolved.reason)] += 1
             else:
                 log.info("%s -> товар не найден, игнорирую", article)
                 result.products_missing += 1

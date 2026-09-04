@@ -137,5 +137,43 @@ class TestResponseDiagnostics(unittest.TestCase):
         self.assertIn("признаки: нет", text)
 
 
+
+
+class TestFailureReasons(unittest.TestCase):
+    """Причина отказа должна попадать в сводку в читаемом виде."""
+
+    def test_http_status_extracted(self):
+        from src.checker import short_reason
+
+        self.assertEqual(short_reason("search-failed:HTTP 403 для https://x"), "HTTP 403")
+        self.assertEqual(short_reason("temporary:HTTP 503 для https://x"), "HTTP 503")
+
+    def test_network_problems_named_in_russian(self):
+        from src.checker import short_reason
+
+        self.assertEqual(short_reason("search-failed:Read timed out"), "таймаут")
+        self.assertEqual(short_reason("search-failed:Connection aborted"), "нет соединения")
+        self.assertEqual(short_reason("not-found"), "товар не найден")
+
+    def test_reasons_are_counted(self):
+        import pathlib as _pathlib
+        import tempfile as _tempfile
+
+        from src.store import Store
+
+        tmp = _tempfile.TemporaryDirectory()
+        try:
+            store = Store.load(_pathlib.Path(tmp.name) / "state.json")
+            items = many_items(12)
+            site = FakeSite({
+                f"ART-{i:03d}": ResolveResult(None, None, 1, "search-failed:HTTP 403 для https://x")
+                for i in range(12)
+            })
+            result = run_check(items, store, site)
+            self.assertEqual(result.failure_reasons["HTTP 403"], 12)
+            self.assertTrue(result.looks_broken)
+        finally:
+            tmp.cleanup()
+
 if __name__ == "__main__":
     unittest.main()
